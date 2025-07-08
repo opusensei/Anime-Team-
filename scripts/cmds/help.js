@@ -1,91 +1,125 @@
 const { getPrefix } = global.utils;
-const { commands } = global.GoatBot;
+const { commands, aliases } = global.GoatBot;
 
 module.exports = {
   config: {
     name: "help",
-    version: "3.5",
-    author: "opu",
-    usePrefix: false,
+    version: "1.0",
+    author: "Amit Max ⚡",
+    countDown: 5,
     role: 0,
+    shortDescription: { en: "Show all command list" },
+    longDescription: { en: "Display categorized commands with usage" },
     category: "info",
-    priority: 1
+    guide: { en: "{pn} [category or command name]" }
   },
 
-  onStart: async function ({ message, args, event, threadsData, role }) {
+  onStart: async function ({ message, args, event, role }) {
     const prefix = getPrefix(event.threadID);
-    const arg = args[0]?.toLowerCase();
+    const rawInput = args.join(" ").trim().toLowerCase();
+    const categories = {};
 
-    const header = "╔═━「 𝐇𝐄𝐋𝐏 𝐌𝐄𝐍𝐔 」━═╗";
-    const footer = "╚═━──────────────━═╝";
+    // Organize commands into categories
+    for (const [name, value] of commands) {
+      if (!value?.config || typeof value.onStart !== "function") continue;
+      if (value.config.role > 1 && role < value.config.role) continue;
 
-    if (!arg) {
-      const list = Array.from(commands.entries())
-        .filter(([_, cmd]) => cmd.config?.role <= role)
-        .map(([name]) => `┃ ✦ ${name}`)
-        .join("\n");
-
-      return message.reply(
-        `${header}\n` +
-        `┃ 🔑 Prefix: ${prefix}\n` +
-        `┃ 📂 Total Commands: ${commands.size}\n` +
-        `┃ ⚙️ Available Commands:\n` +
-        `${list}\n` +
-        `${footer}\n` +
-        `\n📌 Use \`${prefix}help -<category>\` to filter by category\n` +
-        `📌 Use \`${prefix}help <command>\` to see command info`
-      );
+      const category = (value.config.category || "Uncategorized").toUpperCase();
+      if (!categories[category]) categories[category] = [];
+      categories[category].push(name);
     }
 
-    if (arg === "-c" && args[1]) {
-      const cmdName = args[1].toLowerCase();
-      const cmd = commands.get(cmdName) || commands.get(global.GoatBot.aliases.get(cmdName));
+    // 📚 Help for all categories
+    if (!rawInput) {
+      let msg = "╔══════ BOT HELP MENU ══════╗\n\n";
+      for (const category of Object.keys(categories).sort()) {
+        msg += `┍━━━[ ${category} ]\n┋`;
 
-      if (!cmd || cmd.config.role > role)
-        return message.reply(`✘ Command "${cmdName}" not found or access denied.`);
+        const cmds = categories[category].sort();
+        for (let i = 0; i < cmds.length; i++) {
+          msg += `〄 ${cmds[i]} `;
+          if ((i + 1) % 5 === 0 && i !== cmds.length - 1) msg += `\n┋`;
+        }
 
-      return message.reply(
-        `${header}\n` +
-        `┃ ✦ Command: ${cmdName}\n` +
-        `┃ ✦ Category: ${cmd.config.category || "Uncategorized"}\n` +
-        `${footer}`
-      );
+        msg += "\n┕━━━━━━━━━━━━◊\n";
+      }
+
+      msg += `Total commands: ${commands.size}\n`;
+      msg += `Prefix: ${prefix}\n`;
+      msg += `Owner: 𝗼𝗽𝘂 𝘀𝗲𝗻𝘀𝗲 🎀`;
+
+      const sent = await message.reply(msg);
+      setTimeout(() => message.unsend(sent.messageID), 120000);
+      return;
     }
 
-    if (arg.startsWith("-")) {
-      const category = arg.slice(1).toLowerCase();
-      const matched = Array.from(commands.entries())
-        .filter(([_, cmd]) => cmd.config?.category?.toLowerCase() === category && cmd.config.role <= role)
-        .map(([name]) => `┃ ✦ ${name}`);
+    // 🔍 Help for category
+    if (rawInput.startsWith("[") && rawInput.endsWith("]")) {
+      const categoryName = rawInput.slice(1, -1).toUpperCase();
+      const list = categories[categoryName];
 
-      if (matched.length === 0)
-        return message.reply(`✘ No commands found under "${category}".`);
+      if (!list) {
+        return message.reply(`❌ Category "${categoryName}" not found.\nAvailable: ${Object.keys(categories).map(c => `[${c}]`).join(", ")}`);
+      }
 
-      return message.reply(
-        `╔═━「 𝐂𝐀𝐓𝐄𝐆𝐎𝐑𝐘: ${category.toUpperCase()} 」━═╗\n` +
-        `${matched.join("\n")}\n` +
-        `${footer}\n` +
-        `\n📌 Try: \`${prefix}help <command>\` to view details`
-      );
+      let msg = `┍━━━[ ${categoryName} ]\n┋`;
+      for (let i = 0; i < list.length; i++) {
+        msg += `〄 ${list[i]} `;
+        if ((i + 1) % 5 === 0 && i !== list.length - 1) msg += `\n┋`;
+      }
+      msg += "\n┕━━━━━━━━━━━━◊";
+
+      const sent = await message.reply(msg);
+      setTimeout(() => message.unsend(sent.messageID), 120000);
+      return;
     }
 
-    const cmd = commands.get(arg) || commands.get(global.GoatBot.aliases.get(arg));
+    // 🧾 Help for specific command
+    const commandName = rawInput;
+    const cmd = commands.get(commandName) || commands.get(aliases.get(commandName));
+    if (!cmd || !cmd.config) {
+      return message.reply(`❌ Command "${commandName}" not found.\nTry: /help`);
+    }
 
-    if (!cmd || cmd.config.role > role)
-      return message.reply(`✘ Command "${arg}" not found.`);
+    const config = cmd.config;
+    const usage = (config.guide?.en || "No usage").replace(/{pn}/g, `${prefix}${config.name}`);
+    const desc = config.longDescription?.en || config.shortDescription?.en || "No description";
+    const roleText = roleTextToString(config.role);
 
-    const info = cmd.config;
-    const guide = info.guide?.en || "No usage info.";
-    const desc = info.longDescription?.en || "No description.";
+    const info = `
+╭───⊙
+│ 🔶 ${stylizeSmallCaps(config.name)}
+├── INFO
+│ 📝 Description: ${desc}
+│ 👑 Author: ${config.author || "Unknown"}
+│ ⚙ Guide: ${usage}
+├── USAGE
+│ 🔯 Version: ${config.version || "1.0"}
+│ ♻ Role: ${roleText}
+╰────────────⊙`;
 
-    return message.reply(
-      `╔═━「 𝐂𝐎𝐌𝐌𝐀𝐍𝐃 𝐃𝐄𝐓𝐀𝐈𝐋𝐒 」━═╗\n` +
-      `┃ ✦ Name: ${info.name}\n` +
-      `┃ ✦ Description: ${desc}\n` +
-      `┃ ✦ Usage: ${guide.replace(/{p}/g, prefix).replace(/{n}/g, info.name)}\n` +
-      `┃ ✦ Role: ${info.role}\n` +
-      `┃ ✦ Category: ${info.category || "Uncategorized"}\n` +
-      `${footer}`
-    );
+    const sent = await message.reply(info);
+    setTimeout(() => message.unsend(sent.messageID), 120000);
   }
 };
+
+// 🔠 Font: Small Caps
+function stylizeSmallCaps(text) {
+  const map = {
+    a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ',
+    j: 'ᴊ', k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ǫ', r: 'ʀ',
+    s: 'ꜱ', t: 'ᴛ', u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', x: 'x', y: 'ʏ', z: 'ᴢ'
+  };
+  return text.split('').map(c => map[c.toLowerCase()] || c).join('');
+}
+
+// 🔓 Role text
+function roleTextToString(role) {
+  switch (role) {
+    case 0: return "Everyone";
+    case 1: return "Group Admin";
+    case 2: return "Bot Admin";
+    case 3: return "Super Admin";
+    default: return `${role}`;
+  }
+                      }
